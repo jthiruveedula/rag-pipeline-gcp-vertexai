@@ -1,0 +1,40 @@
+# Baseline RAG experiment configuration
+experiment_name: baseline
+description: "Vanilla RAG with fixed-size chunking, dense retrieval, no reranker"
+
+chunking:
+  strategy: fixed
+  chunk_size: 512
+  overlap: 64
+
+retrieval:
+  method: dense
+  top_k: 5
+  distance: cosine
+  embedding_model: text-embedding-004
+
+reranker:
+  enabled: false
+  model: null
+
+generation:
+  model: gemini-1.5-flash-001
+  temperature: 0.0
+  max_tokens: 1024
+
+eval:
+  dataset_path: data/eval/golden_set.jsonl
+  metrics:
+    - faithfulness
+    - answer_relevancy
+    - context_recall
+  faithfulness_threshold: 0.85
+  p95_latency_threshold_ms: 1200
+
+gcp:
+  project_id: ${GCP_PROJECT_ID}
+  bq_dataset: rag_eval
+  bq_table: experiment_results
+  gcs_bucket: ${GCS_SCORECARD_BUCKET}
+  location: us-central1
+

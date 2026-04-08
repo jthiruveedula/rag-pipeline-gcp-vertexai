@@ -1,0 +1,84 @@
+name: RAG Benchmark CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'configs/**'
+      - 'platform/**'
+  workflow_dispatch:
+    inputs:
+      config_path:
+        description: 'Experiment config YAML path'
+        required: false
+        default: 'configs/baseline.yaml'
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  benchmark:
+    name: RAG Benchmark Regression Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml
+          # Install optional deps if available
+          pip install google-cloud-bigquery google-cloud-storage || true
+          pip install ragas langchain-google-vertexai datasets pandas || true
+
+      - name: Authenticate to GCP via Workload Identity
+        if: vars.GCP_PROJECT_ID != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Run baseline benchmark (dry-run in CI)
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCS_SCORECARD_BUCKET: ${{ vars.GCS_SCORECARD_BUCKET }}
+        run: |
+          CONFIG=${{ github.event.inputs.config_path || 'configs/baseline.yaml' }}
+          echo "Running benchmark with config: $CONFIG"
+          python src/evaluation/run_benchmark.py \
+            --config "$CONFIG" \
+            --dry-run \
+            --faithfulness-threshold 0.85 \
+            --p95-latency-threshold-ms 1200
+
+      - name: Upload scorecard as workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-scorecard-${{ github.run_id }}
+          path: |
+            scorecard*.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Write benchmark summary
+        if: always()
+        run: |
+          echo "## RAG Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Config | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| configs/baseline.yaml | ${{ job.status }} |" >> $GITHUB_STEP_SUMMARY
+
